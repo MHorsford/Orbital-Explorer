@@ -1,0 +1,15 @@
+# IDE & Editors
+.idea/
+.vscode/
+
+# Python Caches & Tests
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual Environment
+.venv/
+
+# Icons
+quantum_icon_256.ico
