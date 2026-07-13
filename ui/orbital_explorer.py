@@ -7,6 +7,7 @@ Permite visualizar qualquer orbital (n, l, m) do hidrogênio e outros átomos.
 
 import sys
 import os
+import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -56,6 +57,13 @@ class OrbitalExplorer(QMainWindow):
         self.manual_config = None
         self.manual_feedback = ""
         self.manual_extra_levels = 0
+        self.superposition_phase = 0.0
+        self.superposition_cache = None
+        self.superposition_cache_key = None
+        self.superposition_primary_state = None
+        self.superposition_dynamics = None
+        self.superposition_rendering = False
+        self.superposition_last_tick = None
         self.setWindowTitle("🧪 Orbital Explorer — Simulador de Orbitais Atômicos")
         self.setGeometry(80, 60, 1560, 900)
         self.setMinimumSize(1200, 720)
@@ -105,6 +113,10 @@ class OrbitalExplorer(QMainWindow):
         self.update_timer.timeout.connect(self.on_slider_changed)
         self.update_timer.setInterval(100)  # 100ms debounce
         self.timer_pending = False
+
+        self.superposition_timer = QTimer(self)
+        self.superposition_timer.setInterval(120)
+        self.superposition_timer.timeout.connect(self.advance_superposition)
 
         self.slice_canvases = {'amplitude': None, 'probability': None}
         self.update_filling_diagram()
@@ -226,12 +238,13 @@ class OrbitalExplorer(QMainWindow):
             self.label_iso = QLabel(f"{ISO_VALUE:.3f}") # Texto sincronizado
             layout.addWidget(self.label_iso, 6, 2)
 
-            # Alta qualidade
-            layout.addWidget(QLabel("Qualidade:"), 7, 0)
-            self.check_quality = QCheckBox("PBR + Fundo Preto")
-            self.check_quality.setChecked(self.simulator.scene.high_quality)
-            self.check_quality.stateChanged.connect(self.on_quality_toggled)
-            layout.addWidget(self.check_quality, 7, 1, 1, 2)
+            # Dinâmica quântica
+            layout.addWidget(QLabel("Dinâmica:"), 7, 0)
+            self.check_superposition = QCheckBox("Superposição temporal")
+            self.check_superposition.stateChanged.connect(
+                self.on_superposition_toggled
+            )
+            layout.addWidget(self.check_superposition, 7, 1, 1, 2)
 
             # Plano do corte 2D
             # Orbitais com dependência azimutal podem exigir um plano de corte
@@ -330,8 +343,10 @@ class OrbitalExplorer(QMainWindow):
         )
         self.slider_iso.setToolTip(iso_tip)
         self.label_iso.setToolTip(iso_tip)
-        self.check_quality.setToolTip(
-            "Ativa materiais PBR e iluminação mais detalhada, com maior custo gráfico."
+        self.check_superposition.setToolTip(
+            "Combina dois estados espaciais de um mesmo elétron e anima a "
+            "densidade |Ψ(t)|² produzida pela interferência. A ocupação "
+            "eletrônica do átomo não é modificada."
         )
         self.combo_plane.setToolTip(
             "Plano cartesiano usado nos gráficos de amplitude ψ e probabilidade |ψ|²."
@@ -377,6 +392,101 @@ class OrbitalExplorer(QMainWindow):
         self.viewer_3d_tab = QWidget()
         viewer_3d_layout = QVBoxLayout(self.viewer_3d_tab)
         viewer_3d_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.superposition_panel = QGroupBox("Superposição e evolução temporal")
+        self.superposition_panel.setObjectName("dynamicsPanel")
+        self.superposition_panel.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Maximum
+        )
+        self.superposition_panel.setMaximumHeight(158)
+        dynamics_layout = QGridLayout(self.superposition_panel)
+        dynamics_layout.setContentsMargins(10, 14, 10, 8)
+        dynamics_layout.setHorizontalSpacing(8)
+        dynamics_layout.setVerticalSpacing(6)
+
+        self.superposition_state_a_label = QLabel("A: 1s")
+        self.superposition_state_a_label.setToolTip(
+            "Estado A: orbital definido pelos controles quânticos à esquerda."
+        )
+        dynamics_layout.addWidget(self.superposition_state_a_label, 0, 0)
+        dynamics_layout.addWidget(QLabel("B:"), 0, 1)
+        self.combo_superposition_state_b = QComboBox()
+        self.combo_superposition_state_b.setMinimumContentsLength(12)
+        self.combo_superposition_state_b.setToolTip(
+            "Segundo estado da combinação coerente. Escolha energias diferentes "
+            "para observar evolução da densidade. A lista usa níveis próximos "
+            "ao estado A para preservar resolução e desempenho."
+        )
+        dynamics_layout.addWidget(
+            self.combo_superposition_state_b, 0, 2, 1, 2
+        )
+        self.btn_superposition_play = QPushButton("Pausar")
+        self.btn_superposition_play.setFixedWidth(92)
+        self.btn_superposition_play.setToolTip(
+            "Inicia ou pausa a evolução visual da superposição."
+        )
+        self.btn_superposition_play.clicked.connect(
+            self.toggle_superposition_playback
+        )
+        dynamics_layout.addWidget(self.btn_superposition_play, 0, 4)
+        self.btn_superposition_reset = QPushButton("Reiniciar")
+        self.btn_superposition_reset.setFixedWidth(92)
+        self.btn_superposition_reset.setToolTip(
+            "Retorna a fase relativa a 0° e redesenha a superposição."
+        )
+        self.btn_superposition_reset.clicked.connect(
+            self.reset_superposition_phase
+        )
+        dynamics_layout.addWidget(self.btn_superposition_reset, 0, 5)
+
+        dynamics_layout.addWidget(QLabel("Peso de B:"), 1, 0)
+        self.slider_superposition_weight = QSlider(Qt.Horizontal)
+        self.slider_superposition_weight.setRange(0, 100)
+        self.slider_superposition_weight.setValue(50)
+        self.slider_superposition_weight.setToolTip(
+            "Probabilidade associada ao estado B; 50% cria uma mistura equilibrada."
+        )
+        dynamics_layout.addWidget(
+            self.slider_superposition_weight, 1, 1, 1, 2
+        )
+        self.label_superposition_weight = QLabel("50%")
+        dynamics_layout.addWidget(self.label_superposition_weight, 1, 3)
+        dynamics_layout.addWidget(QLabel("Ritmo visual:"), 1, 4)
+        self.slider_superposition_speed = QSlider(Qt.Horizontal)
+        self.slider_superposition_speed.setRange(10, 150)
+        self.slider_superposition_speed.setValue(50)
+        self.slider_superposition_speed.setToolTip(
+            "Velocidade desacelerada da animação. Não representa a escala de "
+            "tempo física, que é informada abaixo."
+        )
+        dynamics_layout.addWidget(self.slider_superposition_speed, 1, 5)
+        self.label_superposition_speed = QLabel("0,50 ciclo/s")
+        self.label_superposition_speed.setMinimumWidth(78)
+        dynamics_layout.addWidget(self.label_superposition_speed, 1, 6)
+
+        self.superposition_status = QLabel()
+        self.superposition_status.setObjectName("dynamicsStatus")
+        self.superposition_status.setWordWrap(True)
+        self.superposition_status.setMaximumHeight(58)
+        dynamics_layout.addWidget(self.superposition_status, 2, 0, 1, 7)
+        dynamics_layout.setColumnStretch(2, 1)
+        dynamics_layout.setColumnStretch(5, 1)
+
+        self.slider_superposition_weight.valueChanged.connect(
+            self.on_superposition_weight_value_changed
+        )
+        self.slider_superposition_weight.sliderReleased.connect(
+            self.on_superposition_weight_changed
+        )
+        self.slider_superposition_speed.valueChanged.connect(
+            self.on_superposition_speed_changed
+        )
+        self.combo_superposition_state_b.currentIndexChanged.connect(
+            self.on_superposition_state_b_changed
+        )
+        self.populate_superposition_states()
+        self.superposition_panel.setVisible(False)
+        viewer_3d_layout.addWidget(self.superposition_panel)
 
         self.pyvista_widget = QtInteractor(self.viewer_3d_tab)
         self.simulator.scene.use_plotter(self.pyvista_widget)
@@ -844,14 +954,278 @@ class OrbitalExplorer(QMainWindow):
         self.iso_manually_set = True
         self.schedule_update()
 
-    def on_quality_toggled(self, state):
-        """Alterna entre renderização normal e de alta qualidade."""
-        high = (state == Qt.Checked)
-        self.simulator.set_high_quality(high)
-        self.on_render_clicked()   # re-renderiza para ver a diferença
-    
+    def populate_superposition_states(self, preferred=None):
+        """Atualiza o estado B sem permitir que ele seja idêntico ao estado A."""
+        if not hasattr(self, 'combo_superposition_state_b'):
+            return
+        state_a = self.selected_quantum_numbers()
+        primary_changed = state_a != self.superposition_primary_state
+        if primary_changed:
+            self.superposition_primary_state = state_a
+            self.superposition_phase = 0.0
+            self.superposition_cache = None
+            self.superposition_cache_key = None
+        previous = (
+            None if primary_changed
+            else preferred or self.combo_superposition_state_b.currentData()
+        )
 
-    
+        combo = self.combo_superposition_state_b
+        combo.blockSignals(True)
+        combo.clear()
+        minimum_n = max(1, state_a[0] - 2)
+        maximum_n = min(MAX_N, state_a[0] + 2)
+        for n in range(minimum_n, maximum_n + 1):
+            for l in range(n):
+                for m in range(-l, l + 1):
+                    state = (n, l, m)
+                    if state != state_a:
+                        combo.addItem(quantum_label(n, l, m), state)
+
+        target = previous if previous != state_a else None
+        available_default = (
+            (2, 1, 0) if state_a[0] == 1
+            else (state_a[0] - 1, 0, 0)
+        )
+        if target is None or not minimum_n <= target[0] <= maximum_n:
+            target = available_default
+        target_index = next(
+            (
+                index for index in range(combo.count())
+                if combo.itemData(index) == target
+            ),
+            0,
+        )
+        if combo.count():
+            combo.setCurrentIndex(target_index)
+        combo.blockSignals(False)
+        self.superposition_state_a_label.setText(
+            f"A: {quantum_label(*state_a)}"
+        )
+
+    def current_superposition_context(self):
+        """Retorna elétrons e configuração usados nas aproximações de energia."""
+        atom = self.simulator.atom
+        if self.interaction_mode == "Preenchimento manual" and self.manual_config:
+            return (
+                self.manual_config.electron_count,
+                self.manual_config.subshell_occupancy(),
+            )
+        return atom.N_electrons, atom.get_subshell_occupancy()
+
+    def prepare_superposition(self):
+        """Prepara as partes espaciais e as escalas de energia da animação."""
+        from physics.energy_levels import approximate_orbital_energy
+        from physics.superposition import superposition_dynamics
+
+        state_a = self.selected_quantum_numbers()
+        state_b = self.combo_superposition_state_b.currentData()
+        if state_b is None or state_a == state_b:
+            return False
+        electron_count, configuration = self.current_superposition_context()
+        energy_a, z_eff_a = approximate_orbital_energy(
+            self.simulator.atom.Z, state_a[0], state_a[1],
+            electron_count=electron_count, configuration=configuration,
+        )
+        energy_b, z_eff_b = approximate_orbital_energy(
+            self.simulator.atom.Z, state_b[0], state_b[1],
+            electron_count=electron_count, configuration=configuration,
+        )
+        cache_key = (
+            state_a, state_b, round(z_eff_a, 8), round(z_eff_b, 8),
+            self.simulator.atom.Z, electron_count,
+        )
+        if cache_key != self.superposition_cache_key:
+            orbital_a = Orbital(*state_a, electrons=1, Z_eff=z_eff_a)
+            orbital_b = Orbital(*state_b, electrons=1, Z_eff=z_eff_b)
+            animation_grid_size = min(
+                96, 64 + 6 * max(0, max(state_a[0], state_b[0]) - 2)
+            )
+            self.superposition_cache = (
+                self.simulator.renderer.prepare_superposition(
+                    orbital_a, orbital_b, grid_size=animation_grid_size,
+                )
+            )
+            self.superposition_cache_key = cache_key
+        self.superposition_dynamics = superposition_dynamics(
+            energy_a, energy_b,
+        )
+        return True
+
+    @staticmethod
+    def format_quantum_period(seconds):
+        if not np.isfinite(seconds):
+            return "∞"
+        if seconds < 1e-15:
+            return f"{seconds * 1e18:.2f} as"
+        if seconds < 1e-12:
+            return f"{seconds * 1e15:.2f} fs"
+        if seconds < 1e-9:
+            return f"{seconds * 1e12:.2f} ps"
+        return f"{seconds:.3e} s"
+
+    def update_superposition_status(self, *_):
+        """Explica a escala física e distingue-a do ritmo visual."""
+        if not hasattr(self, 'superposition_status'):
+            return
+        dynamics = self.superposition_dynamics
+        speed = self.slider_superposition_speed.value() / 100.0
+        if dynamics is None:
+            self.superposition_status.setText(
+                "Escolha dois estados para calcular a evolução temporal."
+            )
+            return
+        state_b = self.combo_superposition_state_b.currentData()
+        labels = (
+            quantum_label(*self.selected_quantum_numbers()),
+            quantum_label(*state_b) if state_b else "—",
+        )
+        weight_b = self.slider_superposition_weight.value()
+        weight_a = 100 - weight_b
+        if dynamics.is_stationary:
+            evolution = (
+                "Estados degenerados nesta aproximação: ΔE≈0 e a densidade "
+                "permanece estacionária."
+            )
+        else:
+            evolution = (
+                f"ΔE={dynamics.delta_energy_ev:+.4f} eV • "
+                f"f={dynamics.beat_frequency_hz:.3e} Hz • "
+                f"T={self.format_quantum_period(dynamics.beat_period_s)} • "
+                f"fase={np.degrees(self.superposition_phase) % 360:.0f}°"
+            )
+        self.superposition_status.setText(
+            f"Estados: {labels[0]} + {labels[1]} &nbsp; | &nbsp; "
+            f"pesos |c<sub>A</sub>|²={weight_a}% e "
+            f"|c<sub>B</sub>|²={weight_b}% &nbsp; | &nbsp; "
+            f"{evolution}<br><b>Ritmo visual desacelerado:</b> "
+            f"{speed:.2f} ciclo/s; ele não é o tempo físico do elétron."
+        )
+
+    def on_superposition_weight_value_changed(self, value):
+        """Atualiza a leitura do peso sem recalcular a malha durante o arraste."""
+        self.label_superposition_weight.setText(f"{value}%")
+        self.update_superposition_status()
+
+    def on_superposition_speed_changed(self, value):
+        """Exibe o ritmo visual escolhido junto ao respectivo controle."""
+        self.label_superposition_speed.setText(
+            f"{value / 100.0:.2f} ciclo/s".replace(".", ",")
+        )
+        self.update_superposition_status()
+
+    def render_superposition_frame(self, reset_camera=False):
+        """Atualiza um quadro de |Ψ(t)|² sem recalcular os orbitais base."""
+        if self.superposition_rendering or not self.check_superposition.isChecked():
+            return
+        self.superposition_rendering = True
+        try:
+            if not self.prepare_superposition():
+                return
+            mesh = self.simulator.renderer.render_superposition(
+                self.superposition_cache,
+                weight_b=self.slider_superposition_weight.value() / 100.0,
+                relative_phase_rad=self.superposition_phase,
+                iso_value=self.slider_iso.value() / 100.0,
+            )
+            if mesh is None or mesh.n_points == 0:
+                self.superposition_status.setText(
+                    "A isosuperfície não apareceu com este limiar. "
+                    "Reduza o controle de isosuperfície."
+                )
+                return
+            if reset_camera:
+                self.simulator.scene.clear_orbital_meshes()
+            self.simulator.scene.add_orbital_mesh(
+                mesh, "superposition_density", (0.24, 0.88, 1.0), 0.82,
+            )
+            if reset_camera:
+                self.simulator.scene.reset_camera()
+            else:
+                self.simulator.scene.update()
+            self.update_superposition_status()
+            self.update_phase_legend()
+        finally:
+            self.superposition_rendering = False
+
+    def set_superposition_playing(self, playing):
+        """Inicia ou pausa o relógio visual da superposição."""
+        if playing and (
+                not self.check_superposition.isChecked()
+                or not self.prepare_superposition()
+                or self.superposition_dynamics.is_stationary
+        ):
+            playing = False
+        if playing:
+            self.superposition_last_tick = time.monotonic()
+            self.superposition_timer.start()
+            self.btn_superposition_play.setText("Pausar")
+        else:
+            self.superposition_timer.stop()
+            self.superposition_last_tick = None
+            self.btn_superposition_play.setText("Reproduzir")
+        self.update_superposition_status()
+
+    def toggle_superposition_playback(self):
+        self.set_superposition_playing(not self.superposition_timer.isActive())
+
+    def advance_superposition(self):
+        """Avança a fase em escala desacelerada e redesenha a densidade."""
+        now = time.monotonic()
+        elapsed = (
+            0.12 if self.superposition_last_tick is None
+            else min(0.5, now - self.superposition_last_tick)
+        )
+        self.superposition_last_tick = now
+        visual_cycles_per_second = self.slider_superposition_speed.value() / 100.0
+        self.superposition_phase = (
+            self.superposition_phase
+            + 2.0 * np.pi * visual_cycles_per_second * elapsed
+        ) % (2.0 * np.pi)
+        self.render_superposition_frame()
+
+    def reset_superposition_phase(self):
+        self.superposition_phase = 0.0
+        self.render_superposition_frame()
+
+    def on_superposition_weight_changed(self):
+        self.render_superposition_frame()
+
+    def on_superposition_state_b_changed(self):
+        self.superposition_phase = 0.0
+        self.superposition_cache = None
+        self.superposition_cache_key = None
+        if self.check_superposition.isChecked():
+            self.render_superposition_frame(reset_camera=True)
+            self.set_superposition_playing(True)
+            self.update_info(*self.selected_quantum_numbers())
+
+    def on_superposition_toggled(self, state):
+        """Alterna entre um orbital estacionário e a dinâmica de dois estados."""
+        enabled = state == Qt.Checked
+        self.superposition_panel.setVisible(enabled)
+        self.combo_mode.setEnabled(not enabled)
+        if enabled:
+            self.combo_mode.blockSignals(True)
+            self.combo_mode.setCurrentIndex(0)
+            self.combo_mode.blockSignals(False)
+            # O modo dinâmico usa uma superfície de |Ψ|². A atribuição direta
+            # evita reconstruir os orbitais ocupados antes de limpar a cena.
+            self.simulator.renderer.mode = 'isosurface'
+            self.viewer_tabs.setCurrentWidget(self.viewer_3d_tab)
+            self.populate_superposition_states()
+            self.superposition_phase = 0.0
+            self.superposition_cache = None
+            self.superposition_cache_key = None
+            self.render_superposition_frame(reset_camera=True)
+            self.set_superposition_playing(True)
+        else:
+            self.set_superposition_playing(False)
+            self.superposition_cache = None
+            self.superposition_cache_key = None
+            self.on_render_clicked()
+        self.update_info(*self.selected_quantum_numbers())
+
     def on_mode_changed(self, index):
         """Quando muda o modo de renderização."""
         mode = self.combo_mode.itemData(index)
@@ -904,8 +1278,14 @@ class OrbitalExplorer(QMainWindow):
         if self.iso_manually_set:
             self.simulator.set_iso_value(iso_val)
         
-        # Renderizar
-        self.visualize_orbital(n, l, m)
+        # Renderizar o estado estacionário ou a combinação temporal ativa.
+        if self.check_superposition.isChecked():
+            self.populate_superposition_states(
+                preferred=self.combo_superposition_state_b.currentData()
+            )
+            self.render_superposition_frame(reset_camera=True)
+        else:
+            self.visualize_orbital(n, l, m)
         
         # Atualizar info
         self.update_info(n, l, m)
@@ -1038,6 +1418,8 @@ class OrbitalExplorer(QMainWindow):
 
     def on_show_filled(self):
         """Mostra os orbitais preenchidos."""
+        if self.check_superposition.isChecked():
+            self.check_superposition.setChecked(False)
         if self.interaction_mode == "Preenchimento manual" and self.manual_config:
             self.show_manual_filled()
             self.update_manual_panel()
@@ -1232,6 +1614,18 @@ class OrbitalExplorer(QMainWindow):
     def update_phase_legend(self, color=None, electron_count=None, multiple=False):
         """Explica a convenção de cores da representação 3D atual."""
         if not hasattr(self, 'phase_legend'):
+            return
+
+        if (
+                hasattr(self, 'check_superposition')
+                and self.check_superposition.isChecked()
+        ):
+            self.phase_legend.setText(
+                "<b>SUPERPOSIÇÃO TEMPORAL — |Ψ(t)|²</b> &nbsp; "
+                "A superfície ciano representa densidade de probabilidade. "
+                "A mudança de forma vem da interferência entre A e B; "
+                "a animação está desacelerada."
+            )
             return
 
         render_mode = self.combo_mode.currentData() if hasattr(self, 'combo_mode') else "isosurface"
@@ -1449,24 +1843,57 @@ class OrbitalExplorer(QMainWindow):
         occupied_orbital = self.selected_occupancy_orbital(n, l, m)
         electron_count = occupied_orbital.electrons if occupied_orbital else 0
         occupancy_label = "VAZIO" if electron_count == 0 else f"{electron_count} e⁻"
-        self.label_orbital_name.setText(f"{orbital_name} — {occupancy_label}")
-        self.update_quantum_state_card(n, l, m, occupied_orbital)
+        superposition_enabled = (
+            hasattr(self, 'check_superposition')
+            and self.check_superposition.isChecked()
+            and hasattr(self, 'combo_superposition_state_b')
+        )
+        state_b = (
+            self.combo_superposition_state_b.currentData()
+            if superposition_enabled else None
+        )
+        state_b_name = quantum_label(*state_b) if state_b else None
+        if state_b_name:
+            self.label_orbital_name.setText(
+                f"{orbital_name} + {state_b_name} — |Ψ(t)|²"
+            )
+            self.quantum_state_card.setText(
+                "<b>SUPERPOSIÇÃO TEMPORAL</b><br>"
+                f"Estado A: {orbital_name} (n={n}, l={l}, m={m:+d})<br>"
+                f"Estado B: {state_b_name} "
+                f"(n={state_b[0]}, l={state_b[1]}, m={state_b[2]:+d})<br>"
+                "Estado espacial preparado de um elétron; a ocupação do átomo "
+                "não foi modificada."
+            )
+        else:
+            self.label_orbital_name.setText(f"{orbital_name} — {occupancy_label}")
+            self.update_quantum_state_card(n, l, m, occupied_orbital)
         
         # Informações detalhadas
         orbital_type = get_orbital_type(l)
         Z_eff = self.effective_charge_for_state(n, l)
         
-        info = f"Modo: {self.interaction_mode}\n"
-        info += f"Estado do orbital: {occupancy_label}\n"
-        if self.interaction_mode == "Explorar orbitais" and electron_count == 0:
-            info += "Visualização: forma matemática de um estado disponível.\n"
-            info += "Densidade eletrônica real deste orbital: zero.\n"
-        elif self.interaction_mode != "Explorar orbitais" and electron_count == 0:
-            info += "Visualização 3D: ocultada porque o orbital está vazio.\n"
-        elif self.interaction_mode == "Preenchimento manual":
-            info += "Ocupação definida pela construção do usuário.\n"
+        if state_b_name:
+            info = "Visualização: superposição temporal |Ψ(t)|²\n"
+            info += f"Estado preparado: {orbital_name} + {state_b_name}\n"
+            info += (
+                f"Ocupação de {orbital_name} na configuração: "
+                f"{occupancy_label}\n"
+            )
+            info += "A construção visual não altera a configuração eletrônica.\n"
         else:
-            info += "Ocupação pertencente à configuração fundamental.\n"
+            info = f"Modo: {self.interaction_mode}\n"
+            info += f"Estado do orbital: {occupancy_label}\n"
+        if not state_b_name:
+            if self.interaction_mode == "Explorar orbitais" and electron_count == 0:
+                info += "Visualização: forma matemática de um estado disponível.\n"
+                info += "Densidade eletrônica real deste orbital: zero.\n"
+            elif self.interaction_mode != "Explorar orbitais" and electron_count == 0:
+                info += "Visualização 3D: ocultada porque o orbital está vazio.\n"
+            elif self.interaction_mode == "Preenchimento manual":
+                info += "Ocupação definida pela construção do usuário.\n"
+            else:
+                info += "Ocupação pertencente à configuração fundamental.\n"
 
         info += f"\nNúmeros Quânticos:\n"
         info += f"  n (principal)  = {n}    (nível de energia)\n"
@@ -1504,9 +1931,16 @@ class OrbitalExplorer(QMainWindow):
             (4, 1): "🥁 Halteres ainda maiores.",
         }
         
-        desc = descriptions.get((n, l), "Orbital de alta energia")
-        if electron_count == 0:
-            desc += " Estado atualmente vazio."
+        if state_b_name:
+            desc = (
+                f"Superposição temporal {orbital_name} + {state_b_name}. "
+                "A superfície mostra |Ψ(t)|²; a configuração eletrônica do "
+                "átomo permanece inalterada."
+            )
+        else:
+            desc = descriptions.get((n, l), "Orbital de alta energia")
+            if electron_count == 0:
+                desc += " Estado atualmente vazio."
         self.label_description.setText(desc)
     
     def update_info_filled(self):
@@ -1777,6 +2211,8 @@ class OrbitalExplorer(QMainWindow):
 
 
     def closeEvent(self, event):
+        if hasattr(self, 'superposition_timer'):
+            self.superposition_timer.stop()
         for canvas in self.slice_canvases.values():
             if canvas is not None:
                 plt.close(canvas.figure)

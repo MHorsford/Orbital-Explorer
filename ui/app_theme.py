@@ -71,6 +71,21 @@ QGroupBox#viewerCard {
     border-color: #1d4860;
 }
 
+QGroupBox#dynamicsPanel {
+    background-color: #0a2232;
+    border: 1px solid #28627c;
+    border-radius: 11px;
+    margin-top: 13px;
+    padding: 8px 6px 5px 6px;
+}
+
+QGroupBox#dynamicsPanel::title {
+    color: #bcefff;
+    background-color: #12384c;
+    border-color: #32728b;
+    left: 10px;
+}
+
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
@@ -117,6 +132,15 @@ QLabel#phaseLegend {
     border-radius: 8px;
     padding: 7px 10px;
     font-size: 9pt;
+}
+
+QLabel#dynamicsStatus {
+    color: #d7f4ff;
+    background-color: rgba(22, 87, 111, 70);
+    border-left: 3px solid #51d7ef;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 8.5pt;
 }
 
 QLabel#transitionResult {

@@ -9,20 +9,6 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# QUALIDADE DE RENDERIZAÇÃO
-
-# Se True, usa materiais PBR, luzes refinadas e fundo preto.
-HIGH_QUALITY_RENDER = False          # Mude para False para modo mais rápido
-
-# Parâmetros PBR (usados se HIGH_QUALITY_RENDER = True)
-METALLIC = 0.35
-ROUGHNESS = 0.18
-SPECULAR = 0.5
-SPECULAR_POWER = 10
-
-# Fundo para alta qualidade (preto)
-BG_COLOR_HQ = 'black'
-
 # RENDERIZAÇÃO 3D
 
 GRID_SIZE = 120              # Pontos por dimensão para calcular densidade

@@ -11,21 +11,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import numpy as np
 import pyvista as pv
 from config import (
-    WINDOW_WIDTH, WINDOW_HEIGHT, BG_COLOR, BG_COLOR_HQ,
+    WINDOW_WIDTH, WINDOW_HEIGHT, BG_COLOR,
     SHOW_AXES, SHOW_NUCLEUS, CAMERA_INITIAL_POSITION, CAMERA_FOCAL_POINT,
-    COLOR_NUCLEUS, METALLIC, ROUGHNESS, SPECULAR, SPECULAR_POWER,
-    ORBITAL_NEGATIVE_PHASE_COLOR,
+    COLOR_NUCLEUS, ORBITAL_NEGATIVE_PHASE_COLOR,
 )
 
 
 class Scene:
-    def __init__(self, title: str = "Atomic Orbital Simulator", high_quality: bool = True):
+    def __init__(self, title: str = "Atomic Orbital Simulator"):
         self.title = title
-        self.high_quality = high_quality
-        self.metallic = METALLIC
-        self.roughness = ROUGHNESS
-        self.specular = SPECULAR
-        self.specular_power = SPECULAR_POWER
 
         self.plotter = self._create_default_plotter()
         self.actors = {}
@@ -40,11 +34,7 @@ class Scene:
         )
 
     def _configure_plotter(self):
-        # Fundo: preto se alta qualidade, senão azul escuro
-        if self.high_quality:
-            self.plotter.background_color = BG_COLOR_HQ
-        else:
-            self.plotter.background_color = BG_COLOR
+        self.plotter.background_color = BG_COLOR
 
         self._setup_camera()
         # Iluminação padrão de três pontos do PyVista.
@@ -92,14 +82,6 @@ class Scene:
         )
         self.actors['nucleus'] = nucleus
 
-    def set_high_quality(self, high: bool):
-        """Alterna entre modos normal e de alta qualidade."""
-        from config import BG_COLOR, BG_COLOR_HQ
-        self.high_quality = high
-        self.plotter.background_color = BG_COLOR_HQ if high else BG_COLOR
-        # A iluminação não muda, mas forçamos redesenho
-        self.plotter.render()
-
     # CÂMERA
 
     def set_camera_for_range(self, range_max):
@@ -133,11 +115,6 @@ class Scene:
             # Os orbitais usam cores explícitas; uma barra de escala seria redundante.
             'show_scalar_bar': False,
         }
-        if self.high_quality:
-            extra_kwargs.update({
-                'pbr': True, 'metallic': self.metallic, 'roughness': self.roughness,
-                'specular': self.specular, 'specular_power': self.specular_power,
-            })
         extra_kwargs.update(kwargs)
 
         # Nuvens de pontos usam vértices sem faces e exigem parâmetros de

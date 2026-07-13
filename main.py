@@ -10,7 +10,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from atom.atom import Atom
 from simulator.simulator import Simulator
 from ui.orbital_explorer import launch_explorer
-from config import HIGH_QUALITY_RENDER
 
 
 def main():
@@ -21,7 +20,7 @@ def main():
 
     atom = Atom(Z=1)
 
-    sim = Simulator(atom=atom, title="Orbital Explorer — 3D Interactive", high_quality=HIGH_QUALITY_RENDER)
+    sim = Simulator(atom=atom, title="Orbital Explorer — 3D Interactive")
     sim.set_render_mode('isosurface')
 
     print(f"✓ Simulador criado: {atom.get_element_name()}")

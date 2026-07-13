@@ -5,6 +5,7 @@ def test_scientific_references_cover_the_models_and_experimental_data():
     titles = " ".join(reference["title"] for reference in SCIENTIFIC_REFERENCES)
 
     assert "OpenStax" in titles
+    assert "Evolução temporal" in titles
     assert "Slater" in titles
     assert "NIST Atomic Spectra" in titles
     assert "hidrogênio neutro" in titles

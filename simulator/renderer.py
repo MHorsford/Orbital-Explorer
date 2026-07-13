@@ -8,18 +8,33 @@ adaptados aos números quânticos do orbital.
 
 import sys
 import os
+from dataclasses import dataclass
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import numpy as np
 import pyvista as pv
 from config import ISO_VALUE, GRID_SIZE, GRID_RANGE, NUM_POINTS_CLOUD
-from config import HIGH_QUALITY_RENDER, METALLIC, ROUGHNESS, SPECULAR, SPECULAR_POWER
 from utils.grid import make_grid, normalize_array, cartesian_to_spherical
 from utils.sampling import sample_orbital_grid, add_noise_to_points
 from utils.helpers import quantum_label
 from orbitals.wavefunction import HydrogenWavefunction
+from physics.superposition import (
+    state_coefficients, superposition_probability_density,
+)
 from utils.slice2d import plot_orbital_slice, plot_orbital_slice_panel
+
+
+@dataclass
+class PreparedSuperposition:
+    """Partes espaciais de dois estados avaliadas uma única vez no mesmo grid."""
+
+    state_a: tuple
+    state_b: tuple
+    wave_a: np.ndarray
+    wave_b: np.ndarray
+    grid: pv.ImageData
+    range_max: float
 
 
 class Renderer:
@@ -34,9 +49,6 @@ class Renderer:
         self.grid_size = GRID_SIZE
         self.grid_range = GRID_RANGE
         self.point_cloud_size = NUM_POINTS_CLOUD
-        self.roughness = ROUGHNESS
-        self.specular = SPECULAR
-        self.specular_power = SPECULAR_POWER
         self.config = config
         self.relative_iso_factor = None
 
@@ -92,6 +104,93 @@ class Renderer:
         # Quanto mais nós, menor o valor para ver os lóbulos internos
         base = 0.06 if radial_nodes == 0 else 0.04
         return max(0.01, base / (radial_nodes + 0.5))
+
+    # SUPERPOSIÇÃO TEMPORAL
+
+    def prepare_superposition(self, orbital_a, orbital_b, grid_size: int = 64):
+        """Avalia dois orbitais no mesmo grid para reutilização na animação."""
+        grid_size = max(32, min(96, int(grid_size)))
+        range_max = max(
+            self._get_range_for_orbital(orbital_a),
+            self._get_range_for_orbital(orbital_b),
+        )
+        wavefunction = HydrogenWavefunction(use_angstrom=True)
+        X, Y, Z, R, theta, phi = wavefunction.generate_grid(
+            size=grid_size, range_max=range_max,
+        )
+        wave_a = wavefunction.psi(
+            R, theta, phi, orbital_a.n, orbital_a.l, orbital_a.m,
+            orbital_a.Z_eff,
+        )
+        wave_b = wavefunction.psi(
+            R, theta, phi, orbital_b.n, orbital_b.l, orbital_b.m,
+            orbital_b.Z_eff,
+        )
+
+        grid = pv.ImageData()
+        grid.dimensions = wave_a.shape
+        grid.origin = (float(X.min()), float(Y.min()), float(Z.min()))
+        grid.spacing = (
+            float((X.max() - X.min()) / (wave_a.shape[0] - 1)),
+            float((Y.max() - Y.min()) / (wave_a.shape[1] - 1)),
+            float((Z.max() - Z.min()) / (wave_a.shape[2] - 1)),
+        )
+        return PreparedSuperposition(
+            state_a=(orbital_a.n, orbital_a.l, orbital_a.m),
+            state_b=(orbital_b.n, orbital_b.l, orbital_b.m),
+            wave_a=wave_a,
+            wave_b=wave_b,
+            grid=grid,
+            range_max=range_max,
+        )
+
+    def render_superposition(
+            self, prepared: PreparedSuperposition, weight_b: float,
+            relative_phase_rad: float, iso_value: float = None,
+    ):
+        """Gera uma isosuperfície de |Ψ(t)|² para um quadro da animação."""
+        density = superposition_probability_density(
+            prepared.wave_a, prepared.wave_b,
+            weight_b=weight_b,
+            relative_phase_rad=relative_phase_rad,
+        )
+        coefficient_a, coefficient_b = state_coefficients(weight_b)
+        density_upper_bound = (
+            coefficient_a * np.abs(prepared.wave_a)
+            + coefficient_b * np.abs(prepared.wave_b)
+        ) ** 2
+        density_scale = float(np.max(density_upper_bound))
+        if not np.isfinite(density_scale) or density_scale < 1e-18:
+            return self._empty_mesh()
+
+        density_norm = density / density_scale
+        if not np.all(np.isfinite(density_norm)):
+            return self._empty_mesh()
+        prepared.grid['probability'] = density_norm.flatten(order='F')
+
+        threshold = iso_value
+        if threshold is None:
+            threshold = self.iso_value if self.iso_value is not None else 0.06
+        threshold = max(0.005, min(0.45, float(threshold)))
+
+        try:
+            contour = prepared.grid.contour(
+                isosurfaces=[threshold], scalars='probability',
+                progress_bar=False,
+            )
+            if contour.n_points == 0:
+                return self._empty_mesh()
+            mesh = contour.smooth(
+                n_iter=8, relaxation_factor=0.06, progress_bar=False,
+            )
+            mesh.compute_normals(inplace=True)
+            if 'probability' in mesh.point_data:
+                mesh.point_data.remove('probability')
+            mesh.active_scalars_name = None
+            return mesh
+        except Exception as error:
+            print(f"⚠ Erro controlado ao gerar superposição: {error}")
+            return self._empty_mesh()
 
     # MODO: ISOSURFACE
 

@@ -15,6 +15,11 @@ SCIENTIFIC_REFERENCES = (
         "url": "https://openstax.org/books/chemistry-2e/pages/6-4-electronic-structure-of-atoms-electron-configurations",
     },
     {
+        "title": "MIT OpenCourseWare — Evolução temporal e superposição",
+        "scope": "Estados estacionários, fases temporais e combinações coerentes.",
+        "url": "https://ocw.mit.edu/courses/8-04-quantum-physics-i-spring-2013/pages/lecture-notes/",
+    },
+    {
         "title": "IUPAC Gold Book — Princípio da Exclusão de Pauli",
         "scope": "Definição terminológica recomendada pela IUPAC.",
         "url": "https://goldbook.iupac.org/terms/view/PT07089",

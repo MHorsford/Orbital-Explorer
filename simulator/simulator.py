@@ -25,7 +25,7 @@ class Simulator:
     Gerencia o loop de simulação e atualização da cena.
     """
     
-    def __init__(self, atom=None, title: str = "Atomic Orbital Simulator", high_quality: bool = True):
+    def __init__(self, atom=None, title: str = "Atomic Orbital Simulator"):
         """
         Parâmetros:
             atom  : objeto Atom (criado aqui se None)
@@ -36,7 +36,7 @@ class Simulator:
             atom = Atom(Z=6)  # Padrão: Carbono
         
         self.atom = atom
-        self.scene = Scene(title=title, high_quality=high_quality)
+        self.scene = Scene(title=title)
         self.renderer = Renderer()
         
         # Estado do simulador
@@ -126,11 +126,6 @@ class Simulator:
         self.renderer.set_grid_resolution(size)
         self.update_atom_display()
 
-    def set_high_quality(self, high: bool):
-        """Alterna o modo de iluminação e renderização física (PBR)."""
-        self.scene.set_high_quality(high)
-        self.update_atom_display()
-        
     def toggle_orbital_visibility(self, orbital_id: str):
         """Alterna a visibilidade de um orbital específico."""
         if orbital_id in self.visible_orbitals:
