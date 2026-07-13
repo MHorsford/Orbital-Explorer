@@ -7,6 +7,10 @@ def test_scientific_references_cover_the_models_and_experimental_data():
     assert "OpenStax" in titles
     assert "Slater" in titles
     assert "NIST Atomic Spectra" in titles
+    assert "hidrogênio neutro" in titles
+    assert "Regras de seleção" in titles
+    assert "Efeito Zeeman" in titles
+    assert "Magnetão de Bohr" in titles
     assert "CODATA" in titles
 
 

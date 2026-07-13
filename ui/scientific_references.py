@@ -30,6 +30,26 @@ SCIENTIFIC_REFERENCES = (
         "url": "https://physics.nist.gov/asd",
     },
     {
+        "title": "NIST — Níveis de energia do hidrogênio neutro (H I)",
+        "scope": "Níveis avaliados usados na comparação espectroscópica até n=5.",
+        "url": "https://physics.nist.gov/PhysRefData/Handbook/Tables/hydrogentable5.htm",
+    },
+    {
+        "title": "NIST Atomic Spectroscopy — Regras de seleção",
+        "scope": "Transições E1, M1 e E2, mudança de paridade e regras angulares.",
+        "url": "https://www.nist.gov/pml/atomic-spectroscopy-compendium-basic-ideas-notation-data-and-formulas/atomic-spectroscopy",
+    },
+    {
+        "title": "NIST Atomic Spectroscopy — Efeito Zeeman",
+        "scope": "Desdobramento magnético de níveis atômicos e magnetão de Bohr.",
+        "url": "https://physics.nist.gov/Pubs/AtSpec/node12.html",
+    },
+    {
+        "title": "NIST/CODATA — Magnetão de Bohr em eV/T",
+        "scope": "Constante usada no cálculo do deslocamento Zeeman linear.",
+        "url": "https://physics.nist.gov/cgi-bin/cuu/Value?mubev=",
+    },
+    {
         "title": "NIST/CODATA — Constantes físicas fundamentais",
         "scope": "Constantes de Planck, Rydberg, velocidade da luz e carga elementar.",
         "url": "https://physics.nist.gov/cuu/Constants/index.html",

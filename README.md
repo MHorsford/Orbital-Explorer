@@ -10,6 +10,8 @@ O programa permite explorar formas orbitais em 3D, analisar cortes da função d
 - Exploração dos números quânticos `n`, `l` e `m`.
 - Visualização 3D por isosuperfícies, nuvem de pontos ou grade de pontos.
 - Cortes 2D da amplitude `ψ` e da probabilidade `|ψ|²`.
+- Gráficos da função radial `Rₙₗ(r)` e da distribuição de probabilidade `P(r)`.
+- Identificação de nós radiais e angulares, raio mais provável e raio médio.
 - Representação das fases positiva e negativa da função de onda.
 - Configuração eletrônica fundamental de átomos neutros, cátions e ânions.
 - Aplicação de exceções conhecidas da ordem simples de Aufbau.
@@ -21,6 +23,9 @@ O programa permite explorar formas orbitais em 3D, analisar cortes da função d
 - Cartão do estado selecionado com `n`, `l`, `mₗ` e `mₛ` de cada elétron.
 - Diagrama de níveis de energia com ocupação e carga nuclear efetiva estimada.
 - Cálculo didático de absorção e emissão, com energia, frequência e comprimento de onda do fóton.
+- Diagnóstico de transições E1 por estado eletrônico: `Δl`, `Δmₗ`, conservação de spin e mudança de paridade.
+- Comparação opcional das transições de H I até `n=5` com níveis médios avaliados pelo NIST.
+- Campo magnético externo `Bz` de `−10 T` a `+10 T`, com deslocamento Zeeman linear dos estados e das transições.
 
 ## Modos de interação
 
@@ -91,8 +96,10 @@ Na interface:
 1. Escolha o elemento químico.
 2. Selecione o modo de interação.
 3. Ajuste os números quânticos do orbital.
-4. Use as abas centrais para alternar entre visualização 3D, corte 2D e energia/transições.
+4. Use as abas centrais para alternar entre orbital 3D, corte 2D, distribuição radial e energia/transições.
 5. Consulte dados, regras, preenchimento manual e fontes científicas no painel lateral.
+
+Na aba Energia, o controle `Campo Bz` aplica um campo magnético paralelo ao eixo `z`. O resultado informa os deslocamentos dos estados, da frequência e do comprimento de onda, além de identificar componentes `π` e `σ`.
 
 O visualizador 3D pode ser rotacionado com o mouse e ampliado com a roda de rolagem.
 
@@ -115,7 +122,7 @@ main.py     Ponto de entrada da aplicação
 
 ## Testes
 
-Os testes automatizados de função de onda, preenchimento eletrônico, íons e energias podem ser executados com:
+Os testes automatizados de função de onda, distribuição radial, preenchimento eletrônico, íons e energias podem ser executados com:
 
 ```bash
 python -m pytest tests -q
@@ -125,7 +132,7 @@ O arquivo `demos/orbital_visual_demo.py` é uma demonstração gráfica interati
 
 ## Escopo científico
 
-O simulador utiliza funções de onda hidrogenoides com carga nuclear efetiva estimada pelas regras de Slater. As energias exibidas são aproximações hidrogenoides calculadas com essa carga efetiva. Esses modelos são adequados à exploração didática, mas não substituem métodos de química quântica multieletrônica, como Hartree–Fock ou DFT.
+O simulador utiliza funções de onda hidrogenoides com carga nuclear efetiva estimada pelas regras de Slater. Os gráficos radiais e as energias exibidas usam esse mesmo modelo aproximado. O diagnóstico E1 considera os estados individuais `n`, `l`, `mₗ` e `mₛ`; ele não calcula estrutura fina, acoplamento spin–órbita ou `J`. O campo magnético usa o modelo Zeeman linear na base desacoplada `|n,l,mₗ,mₛ⟩`; ele desloca as energias, mas não deforma os orbitais 3D. A comparação NIST é limitada ao hidrogênio neutro até `n=5` e usa valores sem campo. Esses modelos são adequados à exploração didática, mas não substituem métodos de química quântica multieletrônica, como Hartree–Fock ou DFT.
 
 ## Referências científicas
 
@@ -134,12 +141,16 @@ O simulador utiliza funções de onda hidrogenoides com carga nuclear efetiva es
 - [IUPAC Gold Book — Princípio da Exclusão de Pauli](https://goldbook.iupac.org/terms/view/PT07089): definição terminológica.
 - [J. C. Slater — Atomic Shielding Constants](https://doi.org/10.1103/PhysRev.36.57): artigo original do modelo de blindagem usado em `Z_eff`.
 - [NIST Atomic Spectra Database](https://physics.nist.gov/asd): níveis e linhas espectrais avaliados para átomos e íons.
+- [NIST — Níveis de energia de H I](https://physics.nist.gov/PhysRefData/Handbook/Tables/hydrogentable5.htm): níveis avaliados usados na comparação incorporada.
+- [NIST Atomic Spectroscopy — Regras de seleção](https://www.nist.gov/pml/atomic-spectroscopy-compendium-basic-ideas-notation-data-and-formulas/atomic-spectroscopy): regras para transições E1, M1 e E2.
+- [NIST Atomic Spectroscopy — Efeito Zeeman](https://physics.nist.gov/Pubs/AtSpec/node12.html): desdobramento de níveis em campo magnético.
+- [NIST/CODATA — Magnetão de Bohr em eV/T](https://physics.nist.gov/cgi-bin/cuu/Value?mubev=): constante usada no deslocamento Zeeman.
 - [NIST/CODATA — Constantes físicas fundamentais](https://physics.nist.gov/cuu/Constants/index.html): valores recomendados das constantes usadas nos cálculos.
 
 ## Próximos passos
 
 - Site estático com documentação matemática, técnica e pedagógica completa.
-- Comparação opcional com dados espectroscópicos experimentais.
+- Módulo avançado opcional de estrutura fina e acoplamento spin–órbita.
 
 ## Status
 

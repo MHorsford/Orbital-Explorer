@@ -127,6 +127,14 @@ QLabel#transitionResult {
     padding: 9px 12px;
 }
 
+QLabel#radialSummary {
+    color: #dceeff;
+    background-color: #10263a;
+    border: 1px solid #31556f;
+    border-radius: 9px;
+    padding: 8px 11px;
+}
+
 QLabel#quantumStateCard {
     color: #dff3ff;
     background-color: #0d2638;
@@ -235,6 +243,11 @@ QTabWidget#infoTabs QTabBar::tab {
     margin-right: 2px;
 }
 
+QTabWidget#viewerTabs QTabBar::tab {
+    padding: 8px 6px;
+    margin-right: 2px;
+}
+
 QTabBar::tab:selected {
     color: #effaff;
     background-color: #18546b;
@@ -307,7 +320,7 @@ QPushButton[variant="danger"] {
     border-color: rgba(255, 123, 139, 145);
 }
 
-QComboBox, QSpinBox {
+QComboBox, QSpinBox, QDoubleSpinBox {
     min-height: 28px;
     background-color: #071525;
     color: #e2f0fb;
@@ -316,7 +329,7 @@ QComboBox, QSpinBox {
     padding: 3px 28px 3px 9px;
 }
 
-QComboBox:hover, QSpinBox:hover {
+QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {
     border-color: rgba(91, 211, 244, 125);
 }
 

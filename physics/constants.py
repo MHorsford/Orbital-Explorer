@@ -63,6 +63,11 @@ ELECTRON_RADIUS = K_COULOMB * E_CHARGE**2 / (M_ELECTRON * C**2)  # [m]
 
 # Magnetão de Bohr (momento magnético do elétron)
 MU_B = E_CHARGE * HBAR / (2 * M_ELECTRON)  # [A·m² ou J/T]
+MU_B_EV_T = MU_B / E_CHARGE                 # [eV/T] Magnetão de Bohr
+
+# Módulo do fator g do spin eletrônico. O sinal da carga já é tratado na
+# expressão de energia usada pelo modelo de Zeeman.
+ELECTRON_SPIN_G = 2.00231930436
 
 
 # CONSTANTES ATÔMICAS DERIVADAS

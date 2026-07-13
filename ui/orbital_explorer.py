@@ -396,7 +396,7 @@ class OrbitalExplorer(QMainWindow):
         viewer_3d_layout.addWidget(self.phase_legend)
         self.update_phase_legend(multiple=True)
         viewer_3d_index = self.viewer_tabs.addTab(
-            self.viewer_3d_tab, "Visualização 3D"
+            self.viewer_3d_tab, "3D"
         )
         self.viewer_tabs.setTabToolTip(
             viewer_3d_index, "Forma tridimensional e fases da função de onda"
@@ -438,15 +438,25 @@ class OrbitalExplorer(QMainWindow):
         self.slice_tabs.addTab(self.slice_amp_tab, "Amplitude ψ")
         self.slice_tabs.addTab(self.slice_prob_tab, "Probabilidade |ψ|²")
         viewer_2d_layout.addWidget(self.slice_tabs, stretch=1)
-        viewer_2d_index = self.viewer_tabs.addTab(self.viewer_2d_tab, "Corte 2D")
+        viewer_2d_index = self.viewer_tabs.addTab(self.viewer_2d_tab, "2D")
         self.viewer_tabs.setTabToolTip(
             viewer_2d_index, "Amplitude ψ e probabilidade |ψ|² em um plano"
+        )
+
+        from ui.radial_distribution import RadialDistributionWidget
+        self.radial_widget = RadialDistributionWidget()
+        radial_tab_index = self.viewer_tabs.addTab(
+            self.radial_widget, "Radial"
+        )
+        self.viewer_tabs.setTabToolTip(
+            radial_tab_index,
+            "Função radial, probabilidade, nós e raios característicos",
         )
 
         from ui.energy_diagram import EnergyDiagramWidget
         self.energy_widget = EnergyDiagramWidget()
         energy_tab_index = self.viewer_tabs.addTab(
-            self.energy_widget, "Energia e transições"
+            self.energy_widget, "Energia"
         )
         self.viewer_tabs.setTabToolTip(
             energy_tab_index,
@@ -900,7 +910,25 @@ class OrbitalExplorer(QMainWindow):
         # Atualizar info
         self.update_info(n, l, m)
         self.update_filling_diagram()
+        self.update_radial_distribution()
         self.update_energy_diagram()
+
+    def update_radial_distribution(self):
+        """Sincroniza os gráficos radiais com o orbital selecionado."""
+        if not hasattr(self, "radial_widget"):
+            return
+        n, l, m = self.selected_quantum_numbers()
+        z_eff = self.effective_charge_for_state(n, l)
+        occupied = self.selected_occupancy_orbital(n, l, m)
+        electron_count = occupied.electrons if occupied else 0
+        self.radial_widget.update_state(
+            n=n,
+            l=l,
+            z_eff=z_eff,
+            orbital_label=quantum_label(n, l, m),
+            electron_count=electron_count,
+            interaction_mode=self.interaction_mode,
+        )
 
     def update_energy_diagram(self):
         """Sincroniza níveis e transições com a configuração exibida."""
@@ -910,15 +938,23 @@ class OrbitalExplorer(QMainWindow):
         if self.interaction_mode == "Preenchimento manual" and self.manual_config:
             configuration = self.manual_config.subshell_occupancy()
             electron_count = self.manual_config.electron_count
+            orbitals = self.manual_config.orbitals
         else:
             configuration = atom.get_subshell_occupancy()
             electron_count = atom.N_electrons
+            orbitals = atom.orbitals
+        occupied_states = [
+            (orbital.n, orbital.l, orbital.m, spin)
+            for orbital in orbitals
+            for spin in orbital.electron_spins
+        ]
         self.energy_widget.update_state(
             atom.Z,
             electron_count,
             configuration,
-            self.selected_quantum_numbers()[:2],
+            self.selected_quantum_numbers(),
             atom.ion_label,
+            occupied_states=occupied_states,
         )
     
     def on_slice2d_clicked(self):
