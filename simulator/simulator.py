@@ -93,7 +93,10 @@ class Simulator:
                     if mesh and mesh.n_points > 0:
                         color = orbital.color
                         opacity = 0.75 if orbital.electrons == 2 else 0.55
-                        self.scene.add_orbital_mesh(mesh, orbital_id, color, opacity)
+                        self.scene.add_orbital_mesh(
+                            mesh, orbital_id, color, opacity,
+                            volume_brightness=self.renderer.volume_brightness,
+                        )
                         self.visible_orbitals[orbital_id] = orbital
 
     def set_atom_z(self, Z: int):
@@ -125,6 +128,10 @@ class Simulator:
         """Ajusta a resolução do grid de cálculo."""
         self.renderer.set_grid_resolution(size)
         self.update_atom_display()
+
+    def set_volume_brightness(self, brightness: float):
+        """Ajusta o ganho visual da nuvem volumétrica."""
+        self.renderer.set_volume_brightness(brightness)
 
     def toggle_orbital_visibility(self, orbital_id: str):
         """Alterna a visibilidade de um orbital específico."""

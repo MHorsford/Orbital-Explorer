@@ -64,6 +64,10 @@ class OrbitalExplorer(QMainWindow):
         self.superposition_dynamics = None
         self.superposition_rendering = False
         self.superposition_last_tick = None
+        self.superposition_status_tick = 0
+        self.iso_control_value = int(ISO_VALUE * 100)
+        self.volume_brightness_percent = 100
+        self.render_parameter_mode = 'isosurface'
         self.setWindowTitle("🧪 Orbital Explorer — Simulador de Orbitais Atômicos")
         self.setGeometry(80, 60, 1560, 900)
         self.setMinimumSize(1200, 720)
@@ -111,11 +115,13 @@ class OrbitalExplorer(QMainWindow):
         # Timer para atualizações suaves
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.on_slider_changed)
-        self.update_timer.setInterval(100)  # 100ms debounce
+        self.update_timer.setInterval(100)
         self.timer_pending = False
 
         self.superposition_timer = QTimer(self)
-        self.superposition_timer.setInterval(120)
+        # Aproximadamente 6 quadros/s: suficiente para a evolução didática sem
+        # monopolizar a thread da interface durante volume ray casting.
+        self.superposition_timer.setInterval(160)
         self.superposition_timer.timeout.connect(self.advance_superposition)
 
         self.slice_canvases = {'amplitude': None, 'probability': None}
@@ -219,18 +225,20 @@ class OrbitalExplorer(QMainWindow):
             layout.addWidget(QLabel("Renderização:"), 5, 0)
             self.combo_mode = QComboBox()
             self.combo_mode.addItem("Isosuperfície", "isosurface")
+            self.combo_mode.addItem("Nuvem de densidade", "density_volume")
             self.combo_mode.addItem("Nuvem de pontos", "points")
             self.combo_mode.addItem("Grade de pontos", "grid_points")
             self.combo_mode.currentIndexChanged.connect(self.on_mode_changed)
             layout.addWidget(self.combo_mode, 5, 1, 1, 2)
 
             # Iso value
-            layout.addWidget(QLabel("Isosuperfície:"), 6, 0)
+            self.label_render_parameter = QLabel("Isosuperfície:")
+            layout.addWidget(self.label_render_parameter, 6, 0)
             self.slider_iso = QSlider(Qt.Horizontal)
             self.slider_iso.setRange(0, 200)
             
             # Converte o valor do config (ex: 0.12 -> 12)
-            initial_iso_slider_val = int(ISO_VALUE * 100)
+            initial_iso_slider_val = self.iso_control_value
             self.slider_iso.setValue(initial_iso_slider_val) 
             self.slider_iso.sliderMoved.connect(self.on_iso_slider_moved)
             layout.addWidget(self.slider_iso, 6, 1)
@@ -330,6 +338,7 @@ class OrbitalExplorer(QMainWindow):
 
         mode_tips = (
             "Superfície de amplitude constante; destaca a forma e as fases de ψ.",
+            "Volume translúcido: o brilho acompanha |ψ|² e a cor representa a fase.",
             "Amostra pontos segundo |ψ|²; representa uma nuvem de probabilidade.",
             "Mostra pontos do grid acima do limiar; útil para observar a amostragem.",
         )
@@ -343,6 +352,7 @@ class OrbitalExplorer(QMainWindow):
         )
         self.slider_iso.setToolTip(iso_tip)
         self.label_iso.setToolTip(iso_tip)
+        self.label_render_parameter.setToolTip(iso_tip)
         self.check_superposition.setToolTip(
             "Combina dois estados espaciais de um mesmo elétron e anima a "
             "densidade |Ψ(t)|² produzida pela interferência. A ocupação "
@@ -438,6 +448,19 @@ class OrbitalExplorer(QMainWindow):
             self.reset_superposition_phase
         )
         dynamics_layout.addWidget(self.btn_superposition_reset, 0, 5)
+        self.check_superposition_phase_colors = QCheckBox("Fase em cores")
+        self.check_superposition_phase_colors.setChecked(True)
+        self.check_superposition_phase_colors.setToolTip(
+            "Na nuvem de densidade, o brilho continua representando |Ψ|² e "
+            "a cor passa a representar arg(Ψ). O estado A define a referência "
+            "de fase. Desative para usar somente a cor ciano."
+        )
+        self.check_superposition_phase_colors.stateChanged.connect(
+            self.on_superposition_phase_coloring_changed
+        )
+        dynamics_layout.addWidget(
+            self.check_superposition_phase_colors, 0, 6
+        )
 
         dynamics_layout.addWidget(QLabel("Peso de B:"), 1, 0)
         self.slider_superposition_weight = QSlider(Qt.Horizontal)
@@ -950,8 +973,12 @@ class OrbitalExplorer(QMainWindow):
 
 
     def on_iso_slider_moved(self, value):
-        """Usuário arrastou o slider de isovalor manualmente."""
-        self.iso_manually_set = True
+        """Registra a alteração do limiar ou do brilho volumétrico."""
+        if self.combo_mode.currentData() == 'density_volume':
+            self.volume_brightness_percent = value
+        else:
+            self.iso_control_value = value
+            self.iso_manually_set = True
         self.schedule_update()
 
     def populate_superposition_states(self, preferred=None):
@@ -1039,7 +1066,7 @@ class OrbitalExplorer(QMainWindow):
             orbital_a = Orbital(*state_a, electrons=1, Z_eff=z_eff_a)
             orbital_b = Orbital(*state_b, electrons=1, Z_eff=z_eff_b)
             animation_grid_size = min(
-                96, 64 + 6 * max(0, max(state_a[0], state_b[0]) - 2)
+                72, 56 + 4 * max(0, max(state_a[0], state_b[0]) - 2)
             )
             self.superposition_cache = (
                 self.simulator.renderer.prepare_superposition(
@@ -1122,11 +1149,17 @@ class OrbitalExplorer(QMainWindow):
         try:
             if not self.prepare_superposition():
                 return
+            volume_mode = self.simulator.renderer.mode == 'density_volume'
             mesh = self.simulator.renderer.render_superposition(
                 self.superposition_cache,
                 weight_b=self.slider_superposition_weight.value() / 100.0,
                 relative_phase_rad=self.superposition_phase,
                 iso_value=self.slider_iso.value() / 100.0,
+                as_volume=volume_mode,
+                phase_coloring=(
+                    volume_mode
+                    and self.check_superposition_phase_colors.isChecked()
+                ),
             )
             if mesh is None or mesh.n_points == 0:
                 self.superposition_status.setText(
@@ -1138,13 +1171,17 @@ class OrbitalExplorer(QMainWindow):
                 self.simulator.scene.clear_orbital_meshes()
             self.simulator.scene.add_orbital_mesh(
                 mesh, "superposition_density", (0.24, 0.88, 1.0), 0.82,
+                volume_brightness=self.simulator.renderer.volume_brightness,
             )
             if reset_camera:
                 self.simulator.scene.reset_camera()
             else:
                 self.simulator.scene.update()
-            self.update_superposition_status()
-            self.update_phase_legend()
+            self.superposition_status_tick += 1
+            if reset_camera or self.superposition_status_tick % 3 == 0:
+                self.update_superposition_status()
+            if reset_camera:
+                self.update_phase_legend()
         finally:
             self.superposition_rendering = False
 
@@ -1191,6 +1228,12 @@ class OrbitalExplorer(QMainWindow):
     def on_superposition_weight_changed(self):
         self.render_superposition_frame()
 
+    def on_superposition_phase_coloring_changed(self, _state):
+        """Alterna entre densidade monocromática e fase relativa em cores."""
+        if self.check_superposition.isChecked():
+            self.render_superposition_frame()
+            self.update_phase_legend()
+
     def on_superposition_state_b_changed(self):
         self.superposition_phase = 0.0
         self.superposition_cache = None
@@ -1204,14 +1247,21 @@ class OrbitalExplorer(QMainWindow):
         """Alterna entre um orbital estacionário e a dinâmica de dois estados."""
         enabled = state == Qt.Checked
         self.superposition_panel.setVisible(enabled)
-        self.combo_mode.setEnabled(not enabled)
+        supported_modes = {'isosurface', 'density_volume'}
+        for index in range(self.combo_mode.count()):
+            item = self.combo_mode.model().item(index)
+            if item is not None:
+                item.setEnabled(
+                    not enabled or self.combo_mode.itemData(index) in supported_modes
+                )
         if enabled:
             self.combo_mode.blockSignals(True)
-            self.combo_mode.setCurrentIndex(0)
+            density_index = self.combo_mode.findData('density_volume')
+            self.combo_mode.setCurrentIndex(max(0, density_index))
             self.combo_mode.blockSignals(False)
-            # O modo dinâmico usa uma superfície de |Ψ|². A atribuição direta
-            # evita reconstruir os orbitais ocupados antes de limpar a cena.
-            self.simulator.renderer.mode = 'isosurface'
+            self.render_parameter_mode = 'density_volume'
+            self.configure_render_parameter_control('density_volume')
+            self.simulator.renderer.set_mode('density_volume')
             self.viewer_tabs.setCurrentWidget(self.viewer_3d_tab)
             self.populate_superposition_states()
             self.superposition_phase = 0.0
@@ -1234,12 +1284,62 @@ class OrbitalExplorer(QMainWindow):
         tooltip = self.combo_mode.itemData(index, Qt.ToolTipRole)
         if tooltip:
             self.combo_mode.setToolTip(tooltip)
-        self.simulator.set_render_mode(mode)
-        self.on_render_clicked()
+        if self.render_parameter_mode == 'density_volume':
+            self.volume_brightness_percent = self.slider_iso.value()
+        else:
+            self.iso_control_value = self.slider_iso.value()
+        self.render_parameter_mode = mode
+        self.configure_render_parameter_control(mode)
+        self.check_superposition_phase_colors.setEnabled(
+            mode == 'density_volume'
+        )
+        if self.check_superposition.isChecked():
+            self.simulator.renderer.set_mode(mode)
+            self.render_superposition_frame(reset_camera=True)
+        else:
+            # A própria ação abaixo renderiza o estado selecionado; chamar
+            # Simulator.set_render_mode aqui faria uma renderização duplicada.
+            self.simulator.renderer.set_mode(mode)
+            self.on_render_clicked()
+
+    def configure_render_parameter_control(self, mode):
+        """Reutiliza o mesmo espaço para limiar de superfície ou brilho."""
+        self.slider_iso.blockSignals(True)
+        if mode == 'density_volume':
+            self.label_render_parameter.setText("Brilho:")
+            self.slider_iso.setRange(20, 200)
+            self.slider_iso.setValue(self.volume_brightness_percent)
+            self.label_iso.setText(f"{self.volume_brightness_percent}%")
+            tip = (
+                "Ganho visual da nuvem. Regiões brilhantes possuem maior |ψ|²; "
+                "o efeito não representa emissão de luz."
+            )
+            self.simulator.set_volume_brightness(
+                self.volume_brightness_percent / 100.0
+            )
+        else:
+            self.label_render_parameter.setText("Isosuperfície:")
+            self.slider_iso.setRange(0, 200)
+            self.slider_iso.setValue(self.iso_control_value)
+            self.label_iso.setText(f"{self.iso_control_value / 100.0:.3f}")
+            tip = (
+                "Limiar da isosuperfície. Valores menores mostram regiões mais "
+                "difusas; valores maiores aproximam a superfície do núcleo."
+            )
+        self.slider_iso.setToolTip(tip)
+        self.label_iso.setToolTip(tip)
+        self.label_render_parameter.setToolTip(tip)
+        self.slider_iso.blockSignals(False)
     
     def schedule_update(self):
         """Agenda uma atualização (debounce)."""
         self.timer_pending = True
+        interval = (
+            180 if hasattr(self, 'combo_mode')
+            and self.combo_mode.currentData() == 'density_volume'
+            else 100
+        )
+        self.update_timer.setInterval(interval)
         if not self.update_timer.isActive():
             self.update_timer.start()
     
@@ -1269,14 +1369,20 @@ class OrbitalExplorer(QMainWindow):
             l = n - 1
             self.slider_l.setValue(l)
         
-        # Atualizar iso value
-        iso_val = self.slider_iso.value() / 100.0  
-        self.label_iso.setText(f"{iso_val:.3f}")
-        # Só empurra pro Renderer se o usuário de fato mexeu o slider —
-        # caso contrário deixamos o Renderer usar seu isovalor adaptativo
-        # (ver renderer.py e o comentário em self.iso_manually_set).
-        if self.iso_manually_set:
-            self.simulator.set_iso_value(iso_val)
+        render_mode = self.combo_mode.currentData()
+        if render_mode == 'density_volume':
+            self.volume_brightness_percent = self.slider_iso.value()
+            self.label_iso.setText(f"{self.volume_brightness_percent}%")
+            self.simulator.set_volume_brightness(
+                self.volume_brightness_percent / 100.0
+            )
+        else:
+            iso_val = self.slider_iso.value() / 100.0
+            self.iso_control_value = self.slider_iso.value()
+            self.label_iso.setText(f"{iso_val:.3f}")
+            # Uma escolha manual substitui o limiar adaptativo do renderizador.
+            if self.iso_manually_set:
+                self.simulator.set_iso_value(iso_val)
         
         # Renderizar o estado estacionário ou a combinação temporal ativa.
         if self.check_superposition.isChecked():
@@ -1616,22 +1722,57 @@ class OrbitalExplorer(QMainWindow):
         if not hasattr(self, 'phase_legend'):
             return
 
+        render_mode = self.combo_mode.currentData() if hasattr(self, 'combo_mode') else "isosurface"
         if (
                 hasattr(self, 'check_superposition')
                 and self.check_superposition.isChecked()
         ):
-            self.phase_legend.setText(
-                "<b>SUPERPOSIÇÃO TEMPORAL — |Ψ(t)|²</b> &nbsp; "
-                "A superfície ciano representa densidade de probabilidade. "
-                "A mudança de forma vem da interferência entre A e B; "
-                "a animação está desacelerada."
-            )
+            if render_mode == 'density_volume':
+                phase_colors = (
+                    hasattr(self, 'check_superposition_phase_colors')
+                    and self.check_superposition_phase_colors.isChecked()
+                )
+                if phase_colors:
+                    self.phase_legend.setText(
+                        "<b>SUPERPOSIÇÃO — DENSIDADE E FASE RELATIVA</b> &nbsp; "
+                        "brilho = |Ψ|²; cor = arg(Ψ), com A como referência. "
+                        "<span style='color:#19ffff'>● 0</span> &nbsp; "
+                        "<span style='color:#8c19ff'>● π/2</span> &nbsp; "
+                        "<span style='color:#ff1919'>● π</span> &nbsp; "
+                        "<span style='color:#8cff19'>● 3π/2</span>. "
+                        "O brilho não representa emissão de luz."
+                    )
+                else:
+                    self.phase_legend.setText(
+                        "<b>SUPERPOSIÇÃO — NUVEM |Ψ(t)|²</b> &nbsp; "
+                        "mais brilho = maior densidade de probabilidade; a cor "
+                        "ciano é apenas uma convenção visual. A animação está "
+                        "desacelerada."
+                    )
+            else:
+                self.phase_legend.setText(
+                    "<b>SUPERPOSIÇÃO TEMPORAL — |Ψ(t)|²</b> &nbsp; "
+                    "A superfície ciano representa densidade de probabilidade. "
+                    "A mudança de forma vem da interferência entre A e B; "
+                    "a animação está desacelerada."
+                )
             return
 
-        render_mode = self.combo_mode.currentData() if hasattr(self, 'combo_mode') else "isosurface"
         if electron_count == 0 and self.interaction_mode != "Explorar orbitais":
             self.phase_legend.setText(
                 "<b>LEGENDA 3D</b> &nbsp; Orbital vazio: nenhuma densidade eletrônica é exibida."
+            )
+            return
+
+        if render_mode == 'density_volume':
+            empty_note = (
+                " Orbital vazio: trata-se apenas da forma matemática disponível."
+                if electron_count == 0 else ""
+            )
+            self.phase_legend.setText(
+                "<b>NUVEM DE DENSIDADE</b> &nbsp; brilho ∝ |ψ|²; as cores "
+                "representam a fase de ψ. O brilho não é emissão de luz."
+                f"{empty_note}"
             )
             return
 
@@ -1687,8 +1828,8 @@ class OrbitalExplorer(QMainWindow):
         occupied = self.selected_occupancy_orbital(n, l, m)
         electron_count = occupied.electrons if occupied else 0
 
-        self.simulator.scene.clear_orbital_meshes()
         if self.interaction_mode != "Explorar orbitais" and electron_count == 0:
+            self.simulator.scene.clear_orbital_meshes()
             self.update_phase_legend(electron_count=0)
             self.slice_status.setText(
                 "Orbital vazio: o corte 2D possui densidade eletrônica zero."
@@ -1699,10 +1840,18 @@ class OrbitalExplorer(QMainWindow):
         orbital = Orbital(
             n=n, l=l, m=m, electrons=electron_count, Z_eff=Z_eff
         )
+        orbital_label = quantum_label(n, l, m)
+        if electron_count == 0:
+            orbital_label += "_forma_vazia"
+
+        # Mantém o ator quando o estado não mudou. No modo volumétrico isso
+        # permite atualizar apenas os voxels RGBA em vez de reconstruir o VTK.
+        for existing_id in list(self.simulator.scene.orbital_meshes):
+            if existing_id != orbital_label:
+                self.simulator.scene.remove_orbital_mesh(existing_id)
         
         # Renderiza
         mesh = self.simulator.renderer.render_orbital(orbital)
-        orbital_label = quantum_label(n, l, m)
         
         # Adiciona na cena
         color = getattr(orbital, 'color', (0.2, 0.8, 1.0))
@@ -1711,11 +1860,11 @@ class OrbitalExplorer(QMainWindow):
         if electron_count == 0:
             color = ORBITAL_EMPTY_POSITIVE_COLOR
             negative_color = ORBITAL_EMPTY_NEGATIVE_COLOR
-            orbital_label += "_forma_vazia"
         self.update_phase_legend(color=color, electron_count=electron_count)
         self.simulator.scene.add_orbital_mesh(
             mesh, orbital_label, color, opacity,
             negative_color=negative_color,
+            volume_brightness=self.simulator.renderer.volume_brightness,
         )
         
         # Enquadra a malha realmente gerada; o alcance teórico pode conter
@@ -1751,6 +1900,7 @@ class OrbitalExplorer(QMainWindow):
             self.simulator.scene.add_orbital_mesh(
                 mesh, label, orbital.color,
                 0.75 if source.electrons == 2 else 0.55,
+                volume_brightness=self.simulator.renderer.volume_brightness,
             )
             max_range = max(
                 max_range,

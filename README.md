@@ -8,7 +8,7 @@ O programa permite explorar formas orbitais em 3D, analisar cortes da função d
 
 - Seleção de elementos químicos de `Z = 1` a `Z = 118`.
 - Exploração dos números quânticos `n`, `l` e `m`.
-- Visualização 3D por isosuperfícies, nuvem de pontos ou grade de pontos.
+- Visualização 3D por isosuperfícies, nuvem volumétrica de densidade, nuvem de pontos ou grade de pontos.
 - Cortes 2D da amplitude `ψ` e da probabilidade `|ψ|²`.
 - Gráficos da função radial `Rₙₗ(r)` e da distribuição de probabilidade `P(r)`.
 - Identificação de nós radiais e angulares, raio mais provável e raio médio.
@@ -26,7 +26,7 @@ O programa permite explorar formas orbitais em 3D, analisar cortes da função d
 - Diagnóstico de transições E1 por estado eletrônico: `Δl`, `Δmₗ`, conservação de spin e mudança de paridade.
 - Comparação opcional das transições de H I até `n=5` com níveis médios avaliados pelo NIST.
 - Campo magnético externo `Bz` de `−10 T` a `+10 T`, com deslocamento Zeeman linear dos estados e das transições.
-- Superposição coerente de dois estados orbitais de um elétron, com animação desacelerada da densidade `|Ψ(t)|²`.
+- Superposição coerente de dois estados orbitais de um elétron, com animação da densidade `|Ψ(t)|²` e coloração opcional da fase relativa `arg(Ψ)`.
 - Controles de estado B, peso probabilístico, reprodução, pausa, reinício e ritmo visual.
 
 ## Modos de interação
@@ -103,7 +103,7 @@ Na interface:
 
 Na aba Energia, o controle `Campo Bz` aplica um campo magnético paralelo ao eixo `z`. O resultado informa os deslocamentos dos estados, da frequência e do comprimento de onda, além de identificar componentes `π` e `σ`.
 
-Na visualização 3D, marque `Superposição temporal`. O orbital definido por `n`, `l` e `m` será o estado A; escolha o estado B e ajuste seu peso. A interface informa `ΔE`, a frequência de batimento e o período físico. O ritmo da animação é deliberadamente desacelerado para que a evolução seja visível. Essa visualização prepara um estado espacial de um elétron e não modifica a ocupação eletrônica do átomo.
+Na visualização 3D, marque `Superposição temporal`. O orbital definido por `n`, `l` e `m` será o estado A; escolha o estado B e ajuste seu peso. A interface informa `ΔE`, a frequência de batimento e o período físico. O ritmo da animação é deliberadamente desacelerado para que a evolução seja visível. Essa visualização prepara um estado espacial de um elétron e não modifica a ocupação eletrônica do átomo. Na `Nuvem de densidade`, o brilho representa `|Ψ(t)|²`; marque `Fase em cores` para usar a cor como `arg(Ψ)`, tomando A como referência. O brilho é apenas uma codificação visual, não emissão de luz.
 
 O visualizador 3D pode ser rotacionado com o mouse e ampliado com a roda de rolagem.
 

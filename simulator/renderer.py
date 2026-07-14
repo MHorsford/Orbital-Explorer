@@ -1,14 +1,15 @@
 """
 simulator/renderer.py
 
-Converte orbitais em malhas 3D ou cortes 2D. Suporta isosuperfícies,
-pontos de grade e nuvens Monte Carlo, com resolução, alcance e isovalor
-adaptados aos números quânticos do orbital.
+Converte orbitais em representações 3D ou cortes 2D. Suporta
+isosuperfícies, volumes de densidade, pontos de grade e nuvens Monte Carlo,
+com resolução e alcance adaptados aos números quânticos do orbital.
 """
 
 import sys
 import os
 from dataclasses import dataclass
+from collections import OrderedDict
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -20,7 +21,7 @@ from utils.sampling import sample_orbital_grid, add_noise_to_points
 from utils.helpers import quantum_label
 from orbitals.wavefunction import HydrogenWavefunction
 from physics.superposition import (
-    state_coefficients, superposition_probability_density,
+    state_coefficients, superposition_wavefunction,
 )
 from utils.slice2d import plot_orbital_slice, plot_orbital_slice_panel
 
@@ -49,11 +50,14 @@ class Renderer:
         self.grid_size = GRID_SIZE
         self.grid_range = GRID_RANGE
         self.point_cloud_size = NUM_POINTS_CLOUD
+        self.volume_brightness = 1.0
+        self._density_volume_cache = OrderedDict()
+        self._density_volume_cache_limit = 6
         self.config = config
         self.relative_iso_factor = None
 
     def set_mode(self, mode: str):
-        if mode not in ['isosurface', 'grid_points', 'points']:
+        if mode not in ['isosurface', 'density_volume', 'grid_points', 'points']:
             print(f"⚠ Modo desconhecido: {mode}. Mantendo: {self.mode}")
             return
         self.mode = mode
@@ -107,6 +111,37 @@ class Renderer:
 
     # SUPERPOSIÇÃO TEMPORAL
 
+    @staticmethod
+    def _image_grid(values, X, Y, Z, scalar_name):
+        """Cria um grid volumétrico preservando a orientação dos eixos."""
+        grid = pv.ImageData()
+        grid.dimensions = values.shape
+        grid.origin = (float(X.min()), float(Y.min()), float(Z.min()))
+        grid.spacing = (
+            float((X.max() - X.min()) / (values.shape[0] - 1)),
+            float((Y.max() - Y.min()) / (values.shape[1] - 1)),
+            float((Z.max() - Z.min()) / (values.shape[2] - 1)),
+        )
+        grid[scalar_name] = values.flatten(order='F')
+        grid.set_active_scalars(scalar_name)
+        return grid
+
+    @staticmethod
+    def _visible_support_slices(probability, threshold=0.001, padding=2):
+        """Recorta o vazio externo que não participa da imagem volumétrica."""
+        support = np.asarray(probability) >= float(threshold)
+        if not np.any(support):
+            return tuple(slice(0, size) for size in probability.shape)
+
+        indices = np.where(support)
+        return tuple(
+            slice(
+                max(0, int(axis_indices.min()) - padding),
+                min(probability.shape[axis], int(axis_indices.max()) + padding + 1),
+            )
+            for axis, axis_indices in enumerate(indices)
+        )
+
     def prepare_superposition(self, orbital_a, orbital_b, grid_size: int = 64):
         """Avalia dois orbitais no mesmo grid para reutilização na animação."""
         grid_size = max(32, min(96, int(grid_size)))
@@ -127,13 +162,24 @@ class Renderer:
             orbital_b.Z_eff,
         )
 
-        grid = pv.ImageData()
-        grid.dimensions = wave_a.shape
-        grid.origin = (float(X.min()), float(Y.min()), float(Z.min()))
-        grid.spacing = (
-            float((X.max() - X.min()) / (wave_a.shape[0] - 1)),
-            float((Y.max() - Y.min()) / (wave_a.shape[1] - 1)),
-            float((Z.max() - Z.min()) / (wave_a.shape[2] - 1)),
+        # O grid teórico possui uma grande região praticamente nula. Manter
+        # apenas o suporte conjunto melhora o enquadramento e reduz o volume
+        # que a GPU percorre em todos os quadros da animação.
+        envelope = np.abs(wave_a) ** 2 + np.abs(wave_b) ** 2
+        envelope_max = float(np.max(envelope))
+        if np.isfinite(envelope_max) and envelope_max > 1e-18:
+            support_slices = self._visible_support_slices(
+                envelope / envelope_max,
+            )
+            wave_a = wave_a[support_slices]
+            wave_b = wave_b[support_slices]
+            X = X[support_slices]
+            Y = Y[support_slices]
+            Z = Z[support_slices]
+
+        grid = self._image_grid(
+            np.zeros_like(np.real(wave_a), dtype=float),
+            X, Y, Z, 'probability',
         )
         return PreparedSuperposition(
             state_a=(orbital_a.n, orbital_a.l, orbital_a.m),
@@ -147,13 +193,15 @@ class Renderer:
     def render_superposition(
             self, prepared: PreparedSuperposition, weight_b: float,
             relative_phase_rad: float, iso_value: float = None,
+            as_volume: bool = False, phase_coloring: bool = False,
     ):
-        """Gera uma isosuperfície de |Ψ(t)|² para um quadro da animação."""
-        density = superposition_probability_density(
+        """Gera uma isosuperfície ou volume de |Ψ(t)|² para um quadro."""
+        wave = superposition_wavefunction(
             prepared.wave_a, prepared.wave_b,
             weight_b=weight_b,
             relative_phase_rad=relative_phase_rad,
         )
+        density = np.abs(wave) ** 2
         coefficient_a, coefficient_b = state_coefficients(weight_b)
         density_upper_bound = (
             coefficient_a * np.abs(prepared.wave_a)
@@ -167,6 +215,16 @@ class Renderer:
         if not np.all(np.isfinite(density_norm)):
             return self._empty_mesh()
         prepared.grid['probability'] = density_norm.flatten(order='F')
+        prepared.grid.set_active_scalars('probability')
+
+        if as_volume:
+            if phase_coloring:
+                # A parte espacial de A é real e seu coeficiente é positivo;
+                # assim, A define a referência de fase da combinação.
+                prepared.grid['phase_angle'] = np.angle(wave).flatten(order='F')
+            elif 'phase_angle' in prepared.grid.point_data:
+                prepared.grid.point_data.remove('phase_angle')
+            return prepared.grid
 
         threshold = iso_value
         if threshold is None:
@@ -191,6 +249,62 @@ class Renderer:
         except Exception as error:
             print(f"⚠ Erro controlado ao gerar superposição: {error}")
             return self._empty_mesh()
+
+    # MODO: NUVEM DE DENSIDADE VOLUMÉTRICA
+
+    def render_density_volume(self, orbital):
+        """Cria um volume em que brilho representa |ψ|² e cor representa fase."""
+        range_max = self._get_range_for_orbital(orbital)
+        # Volume ray casting custa mais que uma superfície. Essa resolução
+        # ainda preserva os nós até n=7 e reduz bastante o trabalho por quadro.
+        grid_size = min(84, max(60, 56 + 4 * orbital.n))
+        cache_key = (
+            orbital.n, orbital.l, orbital.m,
+            round(float(orbital.Z_eff), 6), grid_size, round(range_max, 6),
+        )
+        cached = self._density_volume_cache.pop(cache_key, None)
+        if cached is not None:
+            self._density_volume_cache[cache_key] = cached
+            return cached
+
+        wavefunction = HydrogenWavefunction(use_angstrom=True)
+        X, Y, Z, R, theta, phi = wavefunction.generate_grid(
+            size=grid_size, range_max=range_max,
+        )
+        wave = wavefunction.psi(
+            R, theta, phi, orbital.n, orbital.l, orbital.m, orbital.Z_eff,
+        )
+        probability = np.abs(wave) ** 2
+        probability_max = float(np.max(probability))
+        if not np.isfinite(probability_max) or probability_max < 1e-18:
+            return pv.ImageData()
+
+        probability_norm = probability / probability_max
+        # Orbitais reais resultam em ±|ψ|². Para um valor complexo, o cosseno
+        # da fase fornece uma transição contínua de cor sem alterar a opacidade.
+        phase_projection = np.cos(np.angle(wave))
+        signed_density = phase_projection * probability_norm
+        if not np.all(np.isfinite(signed_density)):
+            return pv.ImageData()
+
+        # A transparência já descarta densidades abaixo de 0,4%. Recortar em
+        # 0,1%, com margem, não remove informação visível e evita enquadrar a
+        # enorme caixa vazia do grid hidrogenoide.
+        support_slices = self._visible_support_slices(probability_norm)
+        probability_norm = probability_norm[support_slices]
+        signed_density = signed_density[support_slices]
+        X = X[support_slices]
+        Y = Y[support_slices]
+        Z = Z[support_slices]
+        grid = self._image_grid(
+            signed_density.astype(float), X, Y, Z, 'signed_density',
+        )
+        grid['probability'] = probability_norm.astype(float).flatten(order='F')
+        grid.set_active_scalars('signed_density')
+        self._density_volume_cache[cache_key] = grid
+        while len(self._density_volume_cache) > self._density_volume_cache_limit:
+            self._density_volume_cache.popitem(last=False)
+        return grid
 
     # MODO: ISOSURFACE
 
@@ -364,6 +478,8 @@ class Renderer:
     def render_orbital(self, orbital):
         if self.mode == 'isosurface':
             return self.render_isosurface(orbital)
+        elif self.mode == 'density_volume':
+            return self.render_density_volume(orbital)
         elif self.mode == 'grid_points':
             return self.render_grid_points(orbital)
         elif self.mode == 'points':
@@ -394,3 +510,6 @@ class Renderer:
 
     def set_point_cloud_size(self, n_points: int):
         self.point_cloud_size = max(1000, min(50000, n_points))
+
+    def set_volume_brightness(self, brightness: float):
+        self.volume_brightness = max(0.2, min(2.0, float(brightness)))
